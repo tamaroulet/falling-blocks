@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+
+    <!-- Unity 6 は C# 9。ここを固定しないと dotnet test は緑なのに Unity だけ落ちる。
+         C# 10 以降の機能である暗黙 using は使えないので明示 using にする。 -->
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- 出所は Game/Assets/Core の 1 箇所だけ。コピーを持たない。
+       Game.Core.asmdef は noEngineReferences なので、ここでビルドできること自体が
+       「Core が UnityEngine に依存していない」ことの機械的な保証になる。 -->
+  <ItemGroup>
+    <Compile Include="../../Game/Assets/Core/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../golden/golden_*.json"
+          Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit.Analyzers" Version="3.9.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+  </ItemGroup>
+
+</Project>

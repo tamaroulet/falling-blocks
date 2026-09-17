@@ -61,6 +61,19 @@ label = "グローバル時間への依存"
 pattern = '\bUnityEngine\.Random\b|\bnew Random\s*\(\s*\)'
 label = "非決定な乱数"
 
+# 以下は docs/design/spec_pipeline.md §11.1（S12・S13）。乱数は XorShift32 だけ、時間は整数ティックだけ（§5 A1・A3）
+[[static.forbidden]]
+pattern = '\bSystem\.Random\b|\bnew\s+Random\s*\(|\bRandom\.Shared\b'
+label = "XorShift32 以外の乱数（System.Random）"
+
+[[static.forbidden]]
+pattern = '\bDateTime(Offset)?\.(Now|UtcNow|Today)\b|\bStopwatch\b|\bEnvironment\.TickCount(64)?\b'
+label = "実時間への依存"
+
+[[static.forbidden]]
+pattern = '\bThread\.Sleep\b|\bTask\.Delay\b'
+label = "実時間の待機"
+
 [merge]
 required_checks = ["test", "approval"]
 

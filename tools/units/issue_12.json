@@ -1,0 +1,81 @@
+{
+  "id": "issue_12",
+  "title": "Ready 初期状態（盤面 10×22・アクティブミノ未配置・各カウンタ 0）",
+  "prompt": "Pure C# の Core に、ゲーム開始前（Ready）の初期状態を表す入れ物と、その値を外から読む公開インターフェースだけを作る。落下・移動・回転・ライン消去・7-Bag 生成・ティック進行は、この単位では一切実装しない。\n\n## 作るもの（名前・型・可視性は厳密に合わせる。テストがこの形に固定されている）\n\nすべて namespace `Game.Core`、既存 `Game/Assets/Core/IsExternalInit.cs` と同じく先頭に `// SPDX-AI-Disclosure: ai-assisted`（または ai-generated）を書く。\n\n1. `Game/Assets/Core/GamePhase.cs` — `public enum GamePhase { Ready, Playing, GameOver }`。値は宣言順の既定値（Ready=0, Playing=1, GameOver=2）のままにし、明示的な数値を振らない。\n2. `Game/Assets/Core/MinoType.cs` — `public enum MinoType { I, O, T, S, Z, J, L }`。宣言順はこの 7 個で固定（構造化仕様 PR-10 の 7-Bag 初期配列順）。形状テーブルはここでは持たない。\n3. `Game/Assets/Core/Rotation.cs` — `public enum Rotation { Spawn, Right, Two, Left }`（仕様の向き 0 / R / 2 / L に対応、時計回りの巡回順）。明示的な数値は振らない。\n4. `Game/Assets/Core/ActiveMino.cs` — `public readonly struct ActiveMino`。コンストラクタは `public ActiveMino(MinoType type, int x, int y, Rotation rotation)`。読み取り専用プロパティ `MinoType Type` / `int X` / `int Y` / `Rotation Rotation`。判定ロジックや形状展開は書かない（後続単位）。\n5. `Game/Assets/Core/Board.cs` — `public sealed class Board`。\n   - `public const int Width = 10;` `public const int VisibleHeight = 20;` `public const int BufferHeight = 2;` `public const int Height = 22;`（Height は VisibleHeight + BufferHeight と一致させる）\n   - `public static bool IsVisibleRow(int y)` — 表示領域 Y=0..19 のときだけ true\n   - `public static bool IsBufferRow(int y)` — バッファ領域 Y=20..21 のときだけ true\n   - `public static bool InBounds(int x, int y)` — 0<=x<=9 かつ 0<=y<=21 のときだけ true\n   - `public bool IsOccupied(int x, int y)` — 盤面内はセルの占有状態を返し、**盤面外は true**（構造化仕様 RL-18「盤面外は固定ブロックが存在するものとして扱う」）。int.MinValue / int.MaxValue を渡しても例外を投げず、オーバーフローもしないこと\n   - 占有状態の実体はインスタンスごとに持つ。static な配列で共有してはいけない\n6. `Game/Assets/Core/GameState.cs` — `public sealed class GameState`。公開パラメーターなしコンストラクタで Ready の初期状態を作る。\n   - `public GamePhase Phase { get; }`（Ready 初期）\n   - `public Board Board { get; }`（全マス空。クラス内で静的メンバーを参照するときはプロパティ名と衝突するので `Game.Core.Board.Width` のように修飾する）\n   - `public ActiveMino? ActiveMino { get; }`（Ready では値なし = 未配置）\n   - `public System.Collections.Generic.IReadOnlyList<MinoType> NextQueue { get; }`（null ではなく長さ 0。外から書き換えられない形で公開する）\n   - `public int Score { get; }` / `public int LinesCleared { get; }` / `public int TickCount { get; }`（いずれも初期値 0）\n   - `public void InjectSeed(uint seed)` — Ready のときだけ有効。受け取ったシードは内部に保持するだけで公開しない。0 が来たら 1 に置き換えて保持する（RL-07）。Phase は Ready のまま変えず、盤面・アクティブミノ・ネクストキュー・スコア・累計消去ライン数・経過ティック数のどれも変更しない。この単位では乱数を 1 回も生成しない\n   - InjectSeed 以外の公開ミューテーターを増やさない（ティックを進める API、入力 API はまだ作らない）\n\n## してはいけないこと\n\n- `tests/Core.Tests/**` の追加・修正・削除。テストは受入条件そのもので、実装側は触らない\n- whitelist 以外のファイルを触ること（`Game/Assets/Tests/**`、`Game/ProjectSettings/**`、`Game/Packages/**`、`.harness.toml`、ワークフローは禁止）\n- 新規 .cs に対応する .meta の追加（harness の permitted は `Game/Assets/Core/**/*.cs` のみ）\n- `UnityEngine` / `MonoBehaviour` / `Time.deltaTime` の参照。Core は noEngineReferences で、dotnet 側でビルドできることが機械的な保証になっている\n- `System.Random` / `new Random(...)` / `Random.Shared` / `DateTime.Now` / `Stopwatch` / `Environment.TickCount` / `Thread.Sleep` / `Task.Delay`。乱数は後続単位で XorShift32 だけ、時間は整数ティックだけ\n- float / double による時間量や座標。座標・カウンタはすべて int、シードは uint\n\n## 制約\n\n- C# 9 相当（`LangVersion 9.0`、暗黙 using 無効、`Nullable enable`）。file-scoped namespace や C# 10 以降の構文は使わない。ブロック形式の namespace を使う\n- 実装差分は 250 行以内（`.harness.toml` の limits.max_impl_lines）\n- 検証は `dotnet test tests/Core.Tests/Core.Tests.csproj`。skip を 1 件も出さない\n- 既存コードに倣い、型とメンバーには日本語の XML doc コメントを付け、仕様 ID（IF-xx / RL-xx / PR-xx）を根拠として書く",
+  "whitelist": [
+    "Game/Assets/Core/GamePhase.cs",
+    "Game/Assets/Core/MinoType.cs",
+    "Game/Assets/Core/Rotation.cs",
+    "Game/Assets/Core/ActiveMino.cs",
+    "Game/Assets/Core/Board.cs",
+    "Game/Assets/Core/GameState.cs"
+  ],
+  "required_symbols": [
+    "GamePhase",
+    "MinoType",
+    "Rotation",
+    "ActiveMino",
+    "ActiveMino.Type",
+    "ActiveMino.X",
+    "ActiveMino.Y",
+    "ActiveMino.Rotation",
+    "Board",
+    "Board.Width",
+    "Board.Height",
+    "Board.VisibleHeight",
+    "Board.BufferHeight",
+    "Board.IsVisibleRow",
+    "Board.IsBufferRow",
+    "Board.InBounds",
+    "Board.IsOccupied",
+    "GameState",
+    "GameState.Phase",
+    "GameState.Board",
+    "GameState.ActiveMino",
+    "GameState.NextQueue",
+    "GameState.Score",
+    "GameState.LinesCleared",
+    "GameState.TickCount",
+    "GameState.InjectSeed"
+  ],
+  "acceptance": {
+    "required_tests": [
+      "InitialStateTests",
+      "BoardGeometryTests",
+      "CoreContractTests"
+    ]
+  },
+  "human_check_point": "不要。Pure C# の初期状態だけで、シーンにも画面にも変化が無い（構造化仕様 §6 は該当なし）",
+  "playtest": "none",
+  "fast_test_project": "tests/Core.Tests/Core.Tests.csproj",
+  "forbidden_leftover": "NotImplementedException",
+  "forbidden_skip_attribute_regex": "\\[\\s*(Ignore|Explicit)\\b",
+  "max_impl_lines": 250,
+  "forbidden_patterns": [
+    [
+      "\\bUnityEngine\\b",
+      "UnityEngine への依存"
+    ],
+    [
+      "\\bMonoBehaviour\\b",
+      "MonoBehaviour への依存"
+    ],
+    [
+      "\\bTime\\.(deltaTime|time|fixedDeltaTime)\\b",
+      "グローバル時間への依存"
+    ],
+    [
+      "\\bUnityEngine\\.Random\\b|\\bnew Random\\s*\\(\\s*\\)",
+      "非決定な乱数"
+    ]
+  ],
+  "selftest_forbidden_probe": "UnityEngine.Debug.Log(0);",
+  "impl_files": [
+    "Game/Assets/Core/GamePhase.cs",
+    "Game/Assets/Core/MinoType.cs",
+    "Game/Assets/Core/Rotation.cs",
+    "Game/Assets/Core/ActiveMino.cs",
+    "Game/Assets/Core/Board.cs",
+    "Game/Assets/Core/GameState.cs"
+  ]
+}

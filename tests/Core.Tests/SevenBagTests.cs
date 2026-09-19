@@ -93,7 +93,7 @@ namespace StandaloneCore.Tests
             var bag = SevenBag.Generate(new XorShift32(1u));
 
             Assert.That(bag, Is.Not.EqualTo(InitialOrder), "seed=1 の 1 回目の乱数は 270369、270369 % 7 = 1 なのでインデックス 6 と 1 が入れ替わり、初期配列のままにはならない（RL-09）");
-            Assert.AreEqual(MinoType.L, bag[1], "i=6 の交換で L がインデックス 1 へ移る（RL-09）");
+            Assert.AreEqual(MinoType.I, bag[1], "インデックス 1 は i=6 で L になるが、その後 i=5(j=1) と i=1(j=0) の交換で動く。最終値は I（RL-09）");
             Assert.AreNotEqual(MinoType.L, bag[6], "i=6 の交換で末尾は L ではなくなる（RL-09）");
         }
 

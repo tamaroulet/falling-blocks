@@ -1,0 +1,83 @@
+{
+  "id": "issue_14",
+  "title": "最初のティックで 7-Bag を生成し先頭ミノを (3, 19) 向き 0 に出現させる",
+  "prompt": "Pure C# の Core に、「Ready でティックを最初に受けたときの Playing への遷移・7-Bag 1 セットの生成・先頭ミノの出現」までを実装する。左右移動・回転・自然落下・ソフトドロップによる落下・接地・固定・ライン消去・スコア加算は、この単位では一切実装しない。\n\n## 作るもの（名前・型・可視性は厳密に合わせる。テストがこの形に固定されている）\n\nすべて namespace `Game.Core`（ブロック形式）、ファイル先頭に `// SPDX-AI-Disclosure: ai-assisted` を書く。\n\n1. `Game/Assets/Core/XorShift32.cs` — `public sealed class XorShift32`。**struct にしてはいけない**（参照として渡し、乱数の消費回数を外から検査している）。\n   - `public XorShift32(uint seed)` — seed が 0 のときは 1 として初期化する（RL-07 / PR-05）\n   - `public uint Next()` — 内部の 32 ビット符号なし整数 x を `x ^= x << 13; x ^= x >> 17; x ^= x << 5;` の順に更新し、**更新後の x** を返す（RL-06）。`>>` は uint の論理シフトであること。seed=1 のとき 1 回目は 270369（0x00042021）、2 回目は 67634689（0x04080601）\n   - 公開するのはコンストラクタと Next() だけ。内部状態は公開しない\n\n2. `Game/Assets/Core/SevenBag.cs` — `public static class SevenBag`。\n   - `public static MinoType[] Generate(XorShift32 rng)` — 初期配列 `[I, O, T, S, Z, J, L]`（PR-10）を Fisher-Yates でシャッフルした、長さ 7 の**新しい配列**を返す。i = 6 から 1 まで降順に `j = (int)(rng.Next() % (uint)(i + 1))` を求め、インデックス i と j のミノを交換する。1 セットの生成で乱数をちょうど 6 回消費する（RL-09 / RL-10）\n   - 内部の静的配列を返したり使い回したりしない。呼び出しごとに独立した配列を返す\n   - `rng` が null のときは `ArgumentNullException` を投げる\n\n3. `Game/Assets/Core/MinoShape.cs` — `public static class MinoShape`。\n   - `public static (int X, int Y)[] SpawnCells(MinoType type)` — 向き 0（Rotation.Spawn）の相対座標 4 個を返す。値は構造化仕様 §5 の形状表どおり: I=(0,2)(1,2)(2,2)(3,2) / O=(1,1)(2,1)(1,2)(2,2) / T=(0,1)(1,1)(2,1)(1,2) / S=(0,1)(1,1)(1,2)(2,2) / Z=(0,2)(1,2)(1,1)(2,1) / J=(0,2)(0,1)(1,1)(2,1) / L=(2,2)(0,1)(1,1)(2,1)（PR-18 / PR-23 / PR-28 / PR-33 / PR-38 / PR-43 / PR-48）\n   - 呼び出しごとに独立した配列を返す。定義の無い MinoType 値には `ArgumentOutOfRangeException` を投げる\n   - 向き R / 2 / L の表と回転計算はこの単位では作らない（後続単位）\n\n4. `Game/Assets/Core/GameState.cs`（既存を改修。既存の公開メンバーの名前と型は変えない）\n   - `Phase` / `ActiveMino` / `TickCount` を内部から更新できるようにする（`{ get; private set; }`）\n   - `NextQueue` は `IReadOnlyList<MinoType>` のまま。外から書き換えられない形で公開する（内部 List をそのまま返さず、読み取り専用ラッパーかコピーを返す）\n   - `public void Tick()` — 1 ティック進める\n   - `public void Tick(int ticks)` — Tick() を ticks 回行う。ticks <= 0（負値・int.MinValue を含む）は外から読める状態を一切変えない No-op\n   - Ready で最初に Tick を受けたとき（ST-01 / LP-03）、そのティックで行うのは次だけ:\n     1. Playing へ遷移する\n     2. 保持しているシード（未注入なら既定値 1、0 が注入されていれば 1）で XorShift32 を初期化する\n     3. SevenBag で 1 セット生成し、ネクストキューへ補充する\n     4. 先頭を取り出して `new ActiveMino(type, 3, 19, Rotation.Spawn)` として出現させる。取り出した後のネクストキューは 6 個（RL-15 / PR-09 / PR-16）\n     5. 自然落下カウンタ 0 / ソフトドロップカウンタ 0 / ロック猶予タイマー 30 / ロック猶予リセット回数 0 に初期化する。これらは公開しない（効果が出るのは後続単位）\n     6. 経過ティック数を 0 にする\n     7. 終了判定を行う（盤面が空なので GameOver には遷移しない）\n     入力の取り込み・移動および回転の適用・落下・接地判定・固定・ライン消去はこのティックでは行わない\n   - Playing での 2 回目以降の Tick は、この単位では経過ティック数を 1 増やすだけにする（LP-04）。落下・接地・固定は後続単位で足す\n   - 出現の段では、ネクストキューが 0 個なら先に新しい 1 セットを生成して補充する（RL-11）。この単位では出現が 1 回しか起きないため実際には走らないが、処理はここに置く\n   - `InjectSeed(uint)` は Ready のときだけ有効（既存どおり、0 は 1 に置換して保持）。Playing / GameOver で受けた注入は外から読める状態を一切変えない（ST-07）\n   - `public void MoveLeft()` / `public void MoveRight()` / `public void RotateClockwise()` / `public void RotateCounterClockwise()` / `public void SetSoftDrop(bool pressed)` を追加する（IF-12 / IF-13 / IF-14 / IF-15）。**この単位ではどのフェーズでも外から読める状態を変えてはならず、乱数も 1 回も消費してはならない**。入力の意図を内部フィールドに覚えるだけにするか、何もしないかのどちらかにする\n   - Score と LinesCleared はこの単位の全過程で 0 のまま\n   - 盤面へ固定ブロックを書き込まない。出現したミノは固定ブロックではないので、出現後も 10 × 22 マスはすべて空である\n\n## してはいけないこと\n\n- `tests/Core.Tests/**` の追加・修正・削除。テストは受入条件そのもので、実装役は触らない\n- whitelist 以外のファイルを触ること（`Game/Assets/Tests/**`、`Game/ProjectSettings/**`、`Game/Packages/**`、`.harness.toml`、ワークフローは禁止）\n- 新規 .cs に対応する .meta の追加（harness の permitted は `Game/Assets/Core/**/*.cs` のみ）\n- `UnityEngine` / `MonoBehaviour` / `Time.deltaTime` の参照\n- `System.Random` / `new Random(...)` / `Random.Shared` / `DateTime.Now` / `Stopwatch` / `Environment.TickCount` / `Thread.Sleep` / `Task.Delay`。乱数は XorShift32 だけ、時間は整数ティックだけ\n- float / double による時間量や座標。座標・カウンタはすべて int、シードと乱数値は uint\n- 範囲外の先取り実装（落下・移動・回転の適用、接地、固定、ライン消去、得点加算、向き R/2/L の形状表）\n\n## 制約\n\n- C# 9 相当（`LangVersion 9.0`、暗黙 using 無効、`Nullable enable`）。file-scoped namespace など C# 10 以降の構文は使わない\n- 実装差分は 400 行以内\n- 検証は `dotnet test tests/Core.Tests/Core.Tests.csproj`。skip を 1 件も出さない\n- 既存コードに倣い、型とメンバーには日本語の XML doc コメントを付け、根拠として仕様 ID（LP-xx / ST-xx / IF-xx / RL-xx / PR-xx）を書く",
+  "whitelist": [
+    "Game/Assets/Core/XorShift32.cs",
+    "Game/Assets/Core/SevenBag.cs",
+    "Game/Assets/Core/MinoShape.cs",
+    "Game/Assets/Core/GameState.cs"
+  ],
+  "required_symbols": [
+    "XorShift32",
+    "XorShift32.Next",
+    "SevenBag",
+    "SevenBag.Generate",
+    "MinoShape",
+    "MinoShape.SpawnCells",
+    "GameState.Tick",
+    "GameState.InjectSeed",
+    "GameState.MoveLeft",
+    "GameState.MoveRight",
+    "GameState.RotateClockwise",
+    "GameState.RotateCounterClockwise",
+    "GameState.SetSoftDrop",
+    "GameState.Phase",
+    "GameState.ActiveMino",
+    "GameState.NextQueue",
+    "GameState.TickCount",
+    "GameState.Score",
+    "GameState.LinesCleared"
+  ],
+  "acceptance": {
+    "required_tests": [
+      "XorShift32Tests",
+      "SevenBagTests",
+      "MinoShapeSpawnTests",
+      "FirstTickSpawnTests"
+    ]
+  },
+  "human_check_point": "不要。Pure C# の状態遷移・乱数・出現位置だけで、シーンにも画面にも変化が無い（構造化仕様 §6 は該当なし）",
+  "playtest": "none",
+  "fast_test_project": "tests/Core.Tests/Core.Tests.csproj",
+  "forbidden_leftover": "NotImplementedException",
+  "forbidden_skip_attribute_regex": "\\[\\s*(Ignore|Explicit)\\b",
+  "max_impl_lines": 400,
+  "forbidden_patterns": [
+    [
+      "\\bUnityEngine\\b",
+      "UnityEngine への依存"
+    ],
+    [
+      "\\bMonoBehaviour\\b",
+      "MonoBehaviour への依存"
+    ],
+    [
+      "\\bTime\\.(deltaTime|time|fixedDeltaTime)\\b",
+      "グローバル時間への依存"
+    ],
+    [
+      "\\bUnityEngine\\.Random\\b|\\bnew Random\\s*\\(\\s*\\)",
+      "非決定な乱数"
+    ],
+    [
+      "\\bSystem\\.Random\\b|\\bnew\\s+Random\\s*\\(|\\bRandom\\.Shared\\b",
+      "XorShift32 以外の乱数（System.Random）"
+    ],
+    [
+      "\\bDateTime(Offset)?\\.(Now|UtcNow|Today)\\b|\\bStopwatch\\b|\\bEnvironment\\.TickCount(64)?\\b",
+      "実時間への依存"
+    ],
+    [
+      "\\bThread\\.Sleep\\b|\\bTask\\.Delay\\b",
+      "実時間の待機"
+    ]
+  ],
+  "selftest_forbidden_probe": "UnityEngine.Debug.Log(0);",
+  "impl_files": [
+    "Game/Assets/Core/XorShift32.cs",
+    "Game/Assets/Core/SevenBag.cs",
+    "Game/Assets/Core/MinoShape.cs",
+    "Game/Assets/Core/GameState.cs"
+  ]
+}

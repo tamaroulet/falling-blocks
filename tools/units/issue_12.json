@@ -1,7 +1,242 @@
 {
+  "schema": 2,
   "id": "issue_12",
   "title": "Ready 初期状態（盤面 10×22・アクティブミノ未配置・各カウンタ 0）",
-  "prompt": "Pure C# の Core に、ゲーム開始前（Ready）の初期状態を表す入れ物と、その値を外から読む公開インターフェースだけを作る。落下・移動・回転・ライン消去・7-Bag 生成・ティック進行は、この単位では一切実装しない。\n\n## 作るもの（名前・型・可視性は厳密に合わせる。テストがこの形に固定されている）\n\nすべて namespace `Game.Core`、既存 `Game/Assets/Core/IsExternalInit.cs` と同じく先頭に `// SPDX-AI-Disclosure: ai-assisted`（または ai-generated）を書く。\n\n1. `Game/Assets/Core/GamePhase.cs` — `public enum GamePhase { Ready, Playing, GameOver }`。値は宣言順の既定値（Ready=0, Playing=1, GameOver=2）のままにし、明示的な数値を振らない。\n2. `Game/Assets/Core/MinoType.cs` — `public enum MinoType { I, O, T, S, Z, J, L }`。宣言順はこの 7 個で固定（構造化仕様 PR-10 の 7-Bag 初期配列順）。形状テーブルはここでは持たない。\n3. `Game/Assets/Core/Rotation.cs` — `public enum Rotation { Spawn, Right, Two, Left }`（仕様の向き 0 / R / 2 / L に対応、時計回りの巡回順）。明示的な数値は振らない。\n4. `Game/Assets/Core/ActiveMino.cs` — `public readonly struct ActiveMino`。コンストラクタは `public ActiveMino(MinoType type, int x, int y, Rotation rotation)`。読み取り専用プロパティ `MinoType Type` / `int X` / `int Y` / `Rotation Rotation`。判定ロジックや形状展開は書かない（後続単位）。\n5. `Game/Assets/Core/Board.cs` — `public sealed class Board`。\n   - `public const int Width = 10;` `public const int VisibleHeight = 20;` `public const int BufferHeight = 2;` `public const int Height = 22;`（Height は VisibleHeight + BufferHeight と一致させる）\n   - `public static bool IsVisibleRow(int y)` — 表示領域 Y=0..19 のときだけ true\n   - `public static bool IsBufferRow(int y)` — バッファ領域 Y=20..21 のときだけ true\n   - `public static bool InBounds(int x, int y)` — 0<=x<=9 かつ 0<=y<=21 のときだけ true\n   - `public bool IsOccupied(int x, int y)` — 盤面内はセルの占有状態を返し、**盤面外は true**（構造化仕様 RL-18「盤面外は固定ブロックが存在するものとして扱う」）。int.MinValue / int.MaxValue を渡しても例外を投げず、オーバーフローもしないこと\n   - 占有状態の実体はインスタンスごとに持つ。static な配列で共有してはいけない\n6. `Game/Assets/Core/GameState.cs` — `public sealed class GameState`。公開パラメーターなしコンストラクタで Ready の初期状態を作る。\n   - `public GamePhase Phase { get; }`（Ready 初期）\n   - `public Board Board { get; }`（全マス空。クラス内で静的メンバーを参照するときはプロパティ名と衝突するので `Game.Core.Board.Width` のように修飾する）\n   - `public ActiveMino? ActiveMino { get; }`（Ready では値なし = 未配置）\n   - `public System.Collections.Generic.IReadOnlyList<MinoType> NextQueue { get; }`（null ではなく長さ 0。外から書き換えられない形で公開する）\n   - `public int Score { get; }` / `public int LinesCleared { get; }` / `public int TickCount { get; }`（いずれも初期値 0）\n   - `public void InjectSeed(uint seed)` — Ready のときだけ有効。受け取ったシードは内部に保持するだけで公開しない。0 が来たら 1 に置き換えて保持する（RL-07）。Phase は Ready のまま変えず、盤面・アクティブミノ・ネクストキュー・スコア・累計消去ライン数・経過ティック数のどれも変更しない。この単位では乱数を 1 回も生成しない\n   - InjectSeed 以外の公開ミューテーターを増やさない（ティックを進める API、入力 API はまだ作らない）\n\n## してはいけないこと\n\n- `tests/Core.Tests/**` の追加・修正・削除。テストは受入条件そのもので、実装側は触らない\n- whitelist 以外のファイルを触ること（`Game/Assets/Tests/**`、`Game/ProjectSettings/**`、`Game/Packages/**`、`.harness.toml`、ワークフローは禁止）\n- 新規 .cs に対応する .meta の追加（harness の permitted は `Game/Assets/Core/**/*.cs` のみ）\n- `UnityEngine` / `MonoBehaviour` / `Time.deltaTime` の参照。Core は noEngineReferences で、dotnet 側でビルドできることが機械的な保証になっている\n- `System.Random` / `new Random(...)` / `Random.Shared` / `DateTime.Now` / `Stopwatch` / `Environment.TickCount` / `Thread.Sleep` / `Task.Delay`。乱数は後続単位で XorShift32 だけ、時間は整数ティックだけ\n- float / double による時間量や座標。座標・カウンタはすべて int、シードは uint\n\n## 制約\n\n- C# 9 相当（`LangVersion 9.0`、暗黙 using 無効、`Nullable enable`）。file-scoped namespace や C# 10 以降の構文は使わない。ブロック形式の namespace を使う\n- 実装差分は 250 行以内（`.harness.toml` の limits.max_impl_lines）\n- 検証は `dotnet test tests/Core.Tests/Core.Tests.csproj`。skip を 1 件も出さない\n- 既存コードに倣い、型とメンバーには日本語の XML doc コメントを付け、仕様 ID（IF-xx / RL-xx / PR-xx）を根拠として書く",
+  "prompt": "ゲーム開始前（Ready）の初期状態を表す入れ物と、その値を外から読む公開インターフェースだけを、Pure C# の Core に作る。作る型とメンバーの形は単位定義の interface に従う。落下・移動・回転・ライン消去・7-Bag の生成・ティックの進行は、この単位では一切実装しない。\n\nすべて namespace Game.Core に置き、各ファイルの先頭行に SPDX-AI-Disclosure の ai-generated 表示を書く。列挙は宣言順の既定値のまま使い、明示的な数値を振らない。`Board` の占有状態はインスタンスごとに持ち、static な配列で共有しない。盤面外の `Board.IsOccupied` は占有扱い（`RL-18`）で、どんな int を渡しても例外もオーバーフローも起こさない。`GameState.InjectSeed` は Ready のときだけ受け取り、0 は 1 に置き換えて内部に保持するだけにする（`RL-07`）。公開する状態はどれも変えず、乱数も生成しない。`GameState.InjectSeed` 以外に状態を変える公開メソッドを足さない。\n\nしてはいけないこと: テストの追加・修正・削除。whitelist 以外のファイルの変更（.meta の追加を含む）。UnityEngine・MonoBehaviour・グローバルな時間・非決定な乱数・実時間の参照。時間量や座標に浮動小数を使うこと。\n\n制約: C# 9 相当で、file-scoped namespace など C# 10 以降の構文は使わない。暗黙 using は無効、Nullable は有効。実装の差分は 250 行以内。型とメンバーには日本語の XML doc コメントを付け、仕様 ID を根拠として書く。",
+  "interface": {
+    "types": [
+      {
+        "name": "GamePhase",
+        "kind": "enum",
+        "values": [
+          "Ready",
+          "Playing",
+          "GameOver"
+        ]
+      },
+      {
+        "name": "MinoType",
+        "kind": "enum",
+        "values": [
+          "I",
+          "O",
+          "T",
+          "S",
+          "Z",
+          "J",
+          "L"
+        ]
+      },
+      {
+        "name": "Rotation",
+        "kind": "enum",
+        "values": [
+          "Spawn",
+          "Right",
+          "Two",
+          "Left"
+        ]
+      },
+      {
+        "name": "ActiveMino",
+        "kind": "struct",
+        "members": [
+          {
+            "name": "ActiveMino",
+            "kind": "ctor",
+            "params": [
+              {
+                "name": "type",
+                "type": "MinoType"
+              },
+              {
+                "name": "x",
+                "type": "int"
+              },
+              {
+                "name": "y",
+                "type": "int"
+              },
+              {
+                "name": "rotation",
+                "type": "Rotation"
+              }
+            ]
+          },
+          {
+            "name": "Type",
+            "kind": "property",
+            "type": "MinoType"
+          },
+          {
+            "name": "X",
+            "kind": "property",
+            "type": "int"
+          },
+          {
+            "name": "Y",
+            "kind": "property",
+            "type": "int"
+          },
+          {
+            "name": "Rotation",
+            "kind": "property",
+            "type": "Rotation"
+          }
+        ]
+      },
+      {
+        "name": "Board",
+        "kind": "class",
+        "members": [
+          {
+            "name": "Board",
+            "kind": "ctor"
+          },
+          {
+            "name": "Width",
+            "kind": "const",
+            "type": "int",
+            "value": {
+              "param": "PR-06"
+            }
+          },
+          {
+            "name": "VisibleHeight",
+            "kind": "const",
+            "type": "int",
+            "value": {
+              "param": "PR-07"
+            }
+          },
+          {
+            "name": "BufferHeight",
+            "kind": "const",
+            "type": "int"
+          },
+          {
+            "name": "Height",
+            "kind": "const",
+            "type": "int",
+            "value": {
+              "param": "PR-08"
+            }
+          },
+          {
+            "name": "IsVisibleRow",
+            "kind": "method",
+            "type": "bool",
+            "static": true,
+            "params": [
+              {
+                "name": "y",
+                "type": "int"
+              }
+            ]
+          },
+          {
+            "name": "IsBufferRow",
+            "kind": "method",
+            "type": "bool",
+            "static": true,
+            "params": [
+              {
+                "name": "y",
+                "type": "int"
+              }
+            ]
+          },
+          {
+            "name": "InBounds",
+            "kind": "method",
+            "type": "bool",
+            "static": true,
+            "params": [
+              {
+                "name": "x",
+                "type": "int"
+              },
+              {
+                "name": "y",
+                "type": "int"
+              }
+            ]
+          },
+          {
+            "name": "IsOccupied",
+            "kind": "method",
+            "type": "bool",
+            "params": [
+              {
+                "name": "x",
+                "type": "int"
+              },
+              {
+                "name": "y",
+                "type": "int"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "GameState",
+        "kind": "class",
+        "members": [
+          {
+            "name": "GameState",
+            "kind": "ctor"
+          },
+          {
+            "name": "Phase",
+            "kind": "property",
+            "type": "GamePhase"
+          },
+          {
+            "name": "Board",
+            "kind": "property",
+            "type": "Board"
+          },
+          {
+            "name": "ActiveMino",
+            "kind": "property",
+            "type": "ActiveMino?"
+          },
+          {
+            "name": "NextQueue",
+            "kind": "property",
+            "type": "System.Collections.Generic.IReadOnlyList<MinoType>"
+          },
+          {
+            "name": "Score",
+            "kind": "property",
+            "type": "int"
+          },
+          {
+            "name": "LinesCleared",
+            "kind": "property",
+            "type": "int"
+          },
+          {
+            "name": "TickCount",
+            "kind": "property",
+            "type": "int"
+          },
+          {
+            "name": "InjectSeed",
+            "kind": "method",
+            "type": "void",
+            "params": [
+              {
+                "name": "seed",
+                "type": "uint"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
   "whitelist": [
     "Game/Assets/Core/GamePhase.cs",
     "Game/Assets/Core/MinoType.cs",
@@ -10,39 +245,374 @@
     "Game/Assets/Core/Board.cs",
     "Game/Assets/Core/GameState.cs"
   ],
-  "required_symbols": [
-    "GamePhase",
-    "MinoType",
-    "Rotation",
-    "ActiveMino",
-    "ActiveMino.Type",
-    "ActiveMino.X",
-    "ActiveMino.Y",
-    "ActiveMino.Rotation",
-    "Board",
-    "Board.Width",
-    "Board.Height",
-    "Board.VisibleHeight",
-    "Board.BufferHeight",
-    "Board.IsVisibleRow",
-    "Board.IsBufferRow",
-    "Board.InBounds",
-    "Board.IsOccupied",
-    "GameState",
-    "GameState.Phase",
-    "GameState.Board",
-    "GameState.ActiveMino",
-    "GameState.NextQueue",
-    "GameState.Score",
-    "GameState.LinesCleared",
-    "GameState.TickCount",
-    "GameState.InjectSeed"
+  "impl_files": [
+    "Game/Assets/Core/GamePhase.cs",
+    "Game/Assets/Core/MinoType.cs",
+    "Game/Assets/Core/Rotation.cs",
+    "Game/Assets/Core/ActiveMino.cs",
+    "Game/Assets/Core/Board.cs",
+    "Game/Assets/Core/GameState.cs"
   ],
   "acceptance": {
+    "cases": [
+      {
+        "id": "ready-initial",
+        "rule": "ST-01",
+        "given": {},
+        "op": {
+          "construct": "GameState"
+        },
+        "expect": {
+          "GameState.Phase": "Ready",
+          "GameState.ActiveMino": null,
+          "GameState.NextQueue": [],
+          "GameState.Score": 0,
+          "GameState.LinesCleared": 0,
+          "GameState.TickCount": 0
+        }
+      },
+      {
+        "id": "seed-zero-keeps-state",
+        "rule": "ST-06",
+        "given": {},
+        "op": {
+          "call": "GameState.InjectSeed",
+          "args": {
+            "seed": 0
+          }
+        },
+        "expect": {
+          "GameState.Phase": {
+            "same": true
+          },
+          "GameState.ActiveMino": {
+            "same": true
+          },
+          "GameState.NextQueue": {
+            "same": true
+          },
+          "GameState.Score": {
+            "same": true
+          },
+          "GameState.LinesCleared": {
+            "same": true
+          },
+          "GameState.TickCount": {
+            "same": true
+          }
+        }
+      },
+      {
+        "id": "seed-nonzero-keeps-state",
+        "rule": "ST-06",
+        "given": {},
+        "op": {
+          "call": "GameState.InjectSeed",
+          "args": {
+            "seed": 12345
+          }
+        },
+        "expect": {
+          "GameState.Phase": {
+            "same": true
+          },
+          "GameState.ActiveMino": {
+            "same": true
+          },
+          "GameState.NextQueue": {
+            "same": true
+          },
+          "GameState.Score": {
+            "same": true
+          },
+          "GameState.LinesCleared": {
+            "same": true
+          },
+          "GameState.TickCount": {
+            "same": true
+          }
+        }
+      },
+      {
+        "id": "visible-row-bottom",
+        "rule": "RL-01",
+        "given": {},
+        "op": {
+          "query": "Board.IsVisibleRow",
+          "args": {
+            "y": 0
+          }
+        },
+        "expect": {
+          "return": true
+        }
+      },
+      {
+        "id": "visible-row-top",
+        "rule": "RL-01",
+        "given": {},
+        "op": {
+          "query": "Board.IsVisibleRow",
+          "args": {
+            "y": 19
+          }
+        },
+        "expect": {
+          "return": true
+        }
+      },
+      {
+        "id": "visible-row-below",
+        "rule": "RL-01",
+        "given": {},
+        "op": {
+          "query": "Board.IsVisibleRow",
+          "args": {
+            "y": -1
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "visible-row-buffer",
+        "rule": "RL-01",
+        "given": {},
+        "op": {
+          "query": "Board.IsVisibleRow",
+          "args": {
+            "y": 20
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "buffer-row-top-visible",
+        "rule": "RL-02",
+        "given": {},
+        "op": {
+          "query": "Board.IsBufferRow",
+          "args": {
+            "y": 19
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "buffer-row-first",
+        "rule": "RL-02",
+        "given": {},
+        "op": {
+          "query": "Board.IsBufferRow",
+          "args": {
+            "y": 20
+          }
+        },
+        "expect": {
+          "return": true
+        }
+      },
+      {
+        "id": "buffer-row-last",
+        "rule": "RL-02",
+        "given": {},
+        "op": {
+          "query": "Board.IsBufferRow",
+          "args": {
+            "y": 21
+          }
+        },
+        "expect": {
+          "return": true
+        }
+      },
+      {
+        "id": "buffer-row-above",
+        "rule": "RL-02",
+        "given": {},
+        "op": {
+          "query": "Board.IsBufferRow",
+          "args": {
+            "y": 22
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "in-bounds-origin",
+        "rule": "RL-03",
+        "given": {},
+        "op": {
+          "query": "Board.InBounds",
+          "args": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "expect": {
+          "return": true
+        }
+      },
+      {
+        "id": "in-bounds-far-corner",
+        "rule": "RL-03",
+        "given": {},
+        "op": {
+          "query": "Board.InBounds",
+          "args": {
+            "x": 9,
+            "y": 21
+          }
+        },
+        "expect": {
+          "return": true
+        }
+      },
+      {
+        "id": "in-bounds-right",
+        "rule": "RL-03",
+        "given": {},
+        "op": {
+          "query": "Board.InBounds",
+          "args": {
+            "x": 10,
+            "y": 0
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "in-bounds-left",
+        "rule": "RL-03",
+        "given": {},
+        "op": {
+          "query": "Board.InBounds",
+          "args": {
+            "x": -1,
+            "y": 0
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "in-bounds-above",
+        "rule": "RL-03",
+        "given": {},
+        "op": {
+          "query": "Board.InBounds",
+          "args": {
+            "x": 0,
+            "y": 22
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "in-bounds-extremes",
+        "rule": "RL-03",
+        "given": {},
+        "op": {
+          "query": "Board.InBounds",
+          "args": {
+            "x": -2147483648,
+            "y": 2147483647
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "occupied-empty-origin",
+        "rule": "RL-04",
+        "given": {},
+        "op": {
+          "query": "Board.IsOccupied",
+          "args": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "occupied-empty-far-corner",
+        "rule": "RL-04",
+        "given": {},
+        "op": {
+          "query": "Board.IsOccupied",
+          "args": {
+            "x": 9,
+            "y": 21
+          }
+        },
+        "expect": {
+          "return": false
+        }
+      },
+      {
+        "id": "occupied-outside-left",
+        "rule": "RL-18",
+        "given": {},
+        "op": {
+          "query": "Board.IsOccupied",
+          "args": {
+            "x": -1,
+            "y": 0
+          }
+        },
+        "expect": {
+          "return": true
+        }
+      },
+      {
+        "id": "occupied-outside-above",
+        "rule": "RL-18",
+        "given": {},
+        "op": {
+          "query": "Board.IsOccupied",
+          "args": {
+            "x": 0,
+            "y": 22
+          }
+        },
+        "expect": {
+          "return": true
+        }
+      },
+      {
+        "id": "occupied-outside-extremes",
+        "rule": "RL-18",
+        "given": {},
+        "op": {
+          "query": "Board.IsOccupied",
+          "args": {
+            "x": -2147483648,
+            "y": -2147483648
+          }
+        },
+        "expect": {
+          "return": true
+        }
+      }
+    ],
     "required_tests": [
-      "InitialStateTests",
-      "BoardGeometryTests",
-      "CoreContractTests"
+      "Issue12Cases"
     ]
   },
   "human_check_point": "不要。Pure C# の初期状態だけで、シーンにも画面にも変化が無い（構造化仕様 §6 は該当なし）",
@@ -70,12 +640,32 @@
     ]
   ],
   "selftest_forbidden_probe": "UnityEngine.Debug.Log(0);",
-  "impl_files": [
-    "Game/Assets/Core/GamePhase.cs",
-    "Game/Assets/Core/MinoType.cs",
-    "Game/Assets/Core/Rotation.cs",
-    "Game/Assets/Core/ActiveMino.cs",
-    "Game/Assets/Core/Board.cs",
-    "Game/Assets/Core/GameState.cs"
+  "required_symbols": [
+    "GamePhase",
+    "MinoType",
+    "Rotation",
+    "ActiveMino",
+    "Board",
+    "GameState",
+    "ActiveMino.Type",
+    "ActiveMino.X",
+    "ActiveMino.Y",
+    "ActiveMino.Rotation",
+    "Board.Width",
+    "Board.VisibleHeight",
+    "Board.BufferHeight",
+    "Board.Height",
+    "Board.IsVisibleRow",
+    "Board.IsBufferRow",
+    "Board.InBounds",
+    "Board.IsOccupied",
+    "GameState.Phase",
+    "GameState.Board",
+    "GameState.ActiveMino",
+    "GameState.NextQueue",
+    "GameState.Score",
+    "GameState.LinesCleared",
+    "GameState.TickCount",
+    "GameState.InjectSeed"
   ]
 }
